@@ -35,8 +35,9 @@ class DeepLinkSession {
 /// Receives `plezy://` links from the platform and hands each to its owner.
 ///
 /// The native side (Android `DeepLinkPlugin`, the shared Apple
-/// `DeepLinkPlugin`) keeps a link until this service accepts it, so a link
-/// that launched the app waits for [fetchInitialLink].
+/// `DeepLinkPlugin`, the Windows `FlutterWindow`) keeps a link until this
+/// service accepts it, so a link that launched the app waits for
+/// [fetchInitialLink].
 ///
 /// One link is pending at a time; a newer link replaces it. A link that
 /// names a profile is applied first: at startup by SetupScreen, which
@@ -63,8 +64,8 @@ class DeepLinkService {
 
   static final DeepLinkService instance = DeepLinkService._(
     const MethodChannel('com.plezy/deep_link'),
-    // Windows and Linux register no URL scheme yet.
-    Platform.isAndroid || Platform.isIOS || Platform.isMacOS,
+    // Linux registers no URL scheme yet.
+    Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows,
   );
 
   final MethodChannel _channel;

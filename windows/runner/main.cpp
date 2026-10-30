@@ -6,6 +6,22 @@
 #include "mpv/display_mode_manager.h"
 #include "utils.h"
 
+// Points the plezy: URL scheme at this executable, for the current user only.
+// Rewritten on every start so a moved or reinstalled copy keeps working.
+static void RegisterDeepLinkScheme() {
+  wchar_t exe[MAX_PATH];
+  const DWORD length = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  if (length == 0 || length == MAX_PATH) return;
+  const std::wstring command = L"\"" + std::wstring(exe) + L"\" \"%1\"";
+  const wchar_t kKey[] = L"Software\\Classes\\plezy";
+  const wchar_t kName[] = L"URL:Plezy";
+  ::RegSetKeyValueW(HKEY_CURRENT_USER, kKey, nullptr, REG_SZ, kName, sizeof(kName));
+  ::RegSetKeyValueW(HKEY_CURRENT_USER, kKey, L"URL Protocol", REG_SZ, L"", sizeof(wchar_t));
+  ::RegSetKeyValueW(
+      HKEY_CURRENT_USER, L"Software\\Classes\\plezy\\shell\\open\\command", nullptr, REG_SZ, command.c_str(),
+      static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+}
+
 int APIENTRY
 wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t* command_line, _In_ int show_command) {
   // Plezy requires the bundled flutter-plezy engine, which presents the Flutter
@@ -19,6 +35,14 @@ wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t* command
   HANDLE mutex = CreateMutex(nullptr, TRUE, L"com.edde746.Plezy.SingleInstance");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND existing = FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Plezy");
+    const std::wstring link = GetDeepLinkArgument();
+    if (existing && !link.empty()) {
+      // Hand the link to the running instance (FlutterWindow::MessageHandler).
+      COPYDATASTRUCT data{
+          FlutterWindow::kDeepLinkCopyData, static_cast<DWORD>(link.size() * sizeof(wchar_t)),
+          const_cast<wchar_t*>(link.c_str())};
+      SendMessageTimeout(existing, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG, 5000, nullptr);
+    }
     if (existing && IsWindowVisible(existing)) {
       ShowWindow(existing, SW_RESTORE);
       SetForegroundWindow(existing);
@@ -37,6 +61,8 @@ wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t* command
       return EXIT_SUCCESS;
     }
   }
+
+  RegisterDeepLinkScheme();
 
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.

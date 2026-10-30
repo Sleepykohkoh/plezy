@@ -37,6 +37,25 @@ std::vector<std::string> GetCommandLineArguments() {
   return command_line_arguments;
 }
 
+std::wstring GetDeepLinkArgument() {
+  int argc;
+  wchar_t** argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+  if (argv == nullptr) {
+    return std::wstring();
+  }
+
+  std::wstring link;
+  for (int i = 1; i < argc && link.empty(); i++) {
+    if (::_wcsnicmp(argv[i], L"plezy:", 6) == 0) {
+      link = argv[i];
+    }
+  }
+
+  ::LocalFree(argv);
+
+  return link;
+}
+
 std::string Utf8FromUtf16(const wchar_t* utf16_string) {
   if (utf16_string == nullptr) {
     return std::string();

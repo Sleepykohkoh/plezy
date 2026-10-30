@@ -5,6 +5,7 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "mpv/display_mode_manager.h"
 #include "mpv/mpv_plugin.h"
+#include "utils.h"
 
 static constexpr wchar_t kWindowPlacementKey[] = L"Software\\Plezy";
 static constexpr wchar_t kWindowPlacementValue[] = L"WindowPlacement";
@@ -165,6 +166,7 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->GetRegistrarForPlugin("MpvAudioPlayerPlugin"));
 
   RegisterWindowChannel();
+  RegisterDeepLinkChannel();
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
@@ -198,6 +200,7 @@ void FlutterWindow::OnDestroy() {
   }
 
   window_channel_ = nullptr;
+  deep_link_channel_ = nullptr;
 
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -233,6 +236,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message, WPARAM const wparam
         DebounceSaveWindowPlacement(hwnd);
       }
       break;
+    case WM_COPYDATA: {
+      const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+      if (data->dwData != kDeepLinkCopyData) break;
+      const std::wstring url(static_cast<const wchar_t*>(data->lpData), data->cbData / sizeof(wchar_t));
+      ReceiveDeepLink(Utf8FromUtf16(url.c_str()));
+      return TRUE;
+    }
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
@@ -287,6 +297,47 @@ void FlutterWindow::RegisterWindowChannel() {
       result->NotImplemented();
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Deep links (com.plezy/deep_link): the Windows side of DeepLinkService.
+//
+// The plezy: scheme (registered by main.cpp) starts Plezy with the link as an
+// argument; a launch while Plezy runs forwards it here as WM_COPYDATA. Dart
+// owns the link grammar, so the link is passed on unchanged.
+// ---------------------------------------------------------------------------
+void FlutterWindow::RegisterDeepLinkChannel() {
+  // A link forwarded while the window was being created is newer.
+  if (pending_deep_link_.empty()) pending_deep_link_ = Utf8FromUtf16(GetDeepLinkArgument().c_str());
+  deep_link_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "com.plezy/deep_link", &flutter::StandardMethodCodec::GetInstance());
+
+  deep_link_channel_->SetMethodCallHandler([this](
+                                               const flutter::MethodCall<flutter::EncodableValue>& call,
+                                               std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+    if (call.method_name() != "getInitialLink") {
+      result->NotImplemented();
+      return;
+    }
+    deep_link_live_ = true;
+    if (pending_deep_link_.empty()) {
+      result->Success();
+    } else {
+      result->Success(flutter::EncodableValue(pending_deep_link_));
+      pending_deep_link_.clear();
+    }
+  });
+}
+
+void FlutterWindow::ReceiveDeepLink(const std::string& url) {
+  if (url.empty()) return;
+  if (!deep_link_live_ || !deep_link_channel_) {
+    pending_deep_link_ = url;
+    return;
+  }
+  deep_link_channel_->InvokeMethod(
+      "onLink", std::make_unique<flutter::EncodableValue>(
+                    flutter::EncodableMap{{flutter::EncodableValue("url"), flutter::EncodableValue(url)}}));
 }
 
 void FlutterWindow::NotifyFullScreenChanged() {
