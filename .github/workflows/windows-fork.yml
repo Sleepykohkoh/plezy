@@ -1,0 +1,68 @@
+name: Windows fork build
+run-name: Windows fork build ${{ github.ref_name }} ${{ github.sha }}
+
+# Fork-only, manual: builds the Windows x64 release like build.yml's
+# build-windows job and packages it with build-installer.ps1. Without
+# ENABLE_UPDATE_CHECK, so the build never offers or installs upstream updates.
+on:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.47.1"
+
+jobs:
+  build-windows-x64:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        shell: pwsh
+        run: flutter pub get --enforce-lockfile --no-example
+
+      - name: Install patched Flutter engine (DComp)
+        shell: pwsh
+        run: |
+          flutter precache --windows
+          .\windows\tool\install-patched-engine.ps1
+
+      - name: Build Windows x64
+        shell: pwsh
+        run: flutter build windows --release --dart-define=GIT_COMMIT=${{ github.sha }} --dart-define=SUPPORTER_MODE=msstore
+
+      - name: Upload build folder
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-x64-build
+          path: build/windows/x64/runner/Release/
+
+      - name: Read version from pubspec
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(python3 scripts/pubspec_version.py pubspec.yaml)
+          echo "version=${VERSION%%+*}" >> "$GITHUB_OUTPUT"
+
+      - name: Build installer and portable
+        shell: pwsh
+        run: .\windows\build-installer.ps1 -X64BuildDir "build\windows\x64\runner\Release" -Version "${{ steps.version.outputs.version }}"
+
+      - name: Upload installer and portable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-x64-installer
+          path: |
+            plezy-windows-installer.exe
+            plezy-windows-x64-portable.7z
