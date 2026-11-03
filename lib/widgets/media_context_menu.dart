@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import '../media/ids.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/watch_state_store.dart';
 import '../media/media_backend.dart';
@@ -758,6 +760,10 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           icon: Symbols.open_in_new_rounded,
           label: t.externalPlayer.playInExternalPlayer,
         ),
+      // Fork (LilaServer): open a Plex movie/episode in the PC review player (mpv + lila-review.lua) through the
+      // lilareview:// scheme its installer registers; the player asks the owner's server for the stream itself.
+      if (Platform.isWindows && isMovieOrEpisode && menu.isPlex)
+        _MenuAction(value: 'review_on_pc', icon: Symbols.rate_review_rounded, label: 'Review on PC'),
     ];
   }
 
@@ -944,6 +950,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         break;
       case 'play_external':
         await _handlePlayExternal(context);
+        break;
+      case 'review_on_pc':
+        await _handleReviewOnPc(context);
         break;
       case 'download':
         await _handleDownload(context);
@@ -1768,6 +1777,22 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       if (context.mounted) {
         showErrorSnackBar(context, t.collections.deleteFailedWithError(error: localizedErrorReason(e)));
       }
+    }
+  }
+
+  /// Fork (LilaServer): lilareview://open?rk=<ratingKey> -> C:\LilaServer\review\lilareview.ps1 -> mpv.
+  Future<void> _handleReviewOnPc(BuildContext context) async {
+    final item = _mediaItem;
+    if (item == null) return;
+    final uri = Uri.parse('lilareview://open?rk=${Uri.encodeQueryComponent(item.id)}');
+    var opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      appLogger.w('Review on PC: $e');
+    }
+    if (!opened && context.mounted) {
+      showErrorSnackBar(context, 'Review player not installed (lilareview://, C:\\LilaServer\\review)');
     }
   }
 
